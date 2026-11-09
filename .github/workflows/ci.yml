@@ -1,0 +1,74 @@
+name: ci
+
+# Pull requests: tests only. Pushes to main: tests, then a new release (tag + GitHub release) if they pass.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (Swift ${{ matrix.swift }})
+    runs-on: ubuntu-24.04
+    container: swift:${{ matrix.swift }}-noble
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest supported (swift-tools-version) and newest toolchain.
+        swift: ["6.2", "6.4"]
+    steps:
+      - uses: actions/checkout@v7
+      - id: toolchain
+        run: echo "hash=$(swift --version 2>&1 | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      # Reuses the compiled dependencies as long as the manifest and the toolchain stay the same.
+      - uses: actions/cache@v6
+        with:
+          path: .build
+          key: swiftpm-linux-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Package.swift') }}
+          restore-keys: swiftpm-linux-${{ steps.toolchain.outputs.hash }}-
+      - run: swift test
+
+  macos:
+    name: macOS (Xcode 26)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift --version
+      - run: swift test
+      - name: Build for iOS
+        run: xcodebuild -scheme SwiftySMTPClient -destination 'generic/platform=iOS' -quiet build
+
+  release:
+    name: Release
+    needs: [linux, macos]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    # One release at a time, so two quick pushes cannot claim the same version.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: version
+        name: Determine the next version
+        shell: bash
+        run: |
+          if [[ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]]; then
+            echo "::notice::main has moved on; the run for the newer push releases these commits as well."
+            exit 0
+          fi
+          scripts/release-version.sh release-notes.md | tee -a "$GITHUB_OUTPUT"
+      # The commit list comes first; GitHub appends merged pull requests, new contributors and the compare link.
+      - name: Create the tag and the GitHub release
+        if: steps.version.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --notes-file release-notes.md --generate-notes
