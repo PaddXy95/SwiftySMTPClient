@@ -96,6 +96,35 @@ import Testing
         #expect(!upstream.recorder.commands.contains("DATA"))
     }
 
+    /// Regression: CR/LF in an envelope address ended `RCPT TO` and injected further commands (CWE-93).
+    @Test(arguments: ["x@a.de>\r\nDATA", "x@a.de\nRSET", "x@a.de\r", "x@a.de\u{0}", "x@a.de> NOTIFY=NEVER", "x<@a.de", "x@a.de\u{7F}", "ä@b.de"])
+    func invalidRecipientIsRejectedBeforeConnecting(_ recipient: String) async throws {
+        let upstream = try await FakeUpstream.start()
+        defer { Task { await upstream.stop() } }
+        await #expect(throws: SMTPClientError.invalidAddress(recipient)) {
+            try await upstream.client(.plain).send(from: "n@x.de", recipients: ["a@b.de", recipient], message: Self.message)
+        }
+        #expect(upstream.recorder.commands.isEmpty)
+    }
+
+    @Test func invalidSenderIsRejectedBeforeConnecting() async throws {
+        let sender = "n@x.de>\r\nRCPT TO:<victim@y.de"
+        let upstream = try await FakeUpstream.start()
+        defer { Task { await upstream.stop() } }
+        await #expect(throws: SMTPClientError.invalidAddress(sender)) {
+            try await upstream.client(.plain).send(from: sender, recipients: ["a@b.de"], message: Self.message)
+        }
+        #expect(upstream.recorder.commands.isEmpty)
+    }
+
+    /// The null reverse-path `MAIL FROM:<>` (used for bounces) stays allowed.
+    @Test func emptySenderIsAllowed() async throws {
+        let upstream = try await FakeUpstream.start()
+        defer { Task { await upstream.stop() } }
+        try await upstream.client(.plain).send(from: "", recipients: ["a@b.de"], message: Self.message)
+        #expect(upstream.recorder.commands.contains("MAIL FROM:<> SIZE=\(Self.message.count)"))
+    }
+
     @Test func dotStuffing() {
         let stuffed = SMTPClientConnection.dotStuffed(Data(".foo\r\nbar\r\n.\r\n".utf8))
         #expect(String(decoding: stuffed, as: UTF8.self) == "..foo\r\nbar\r\n..\r\n.\r\n")

@@ -17,6 +17,23 @@ import SwiftySMTPClient
         #expect(upstream.recorder.commands == ["EHLO test", "NOOP"])
     }
 
+    /// Regression: `command` wrote CR/LF inside a line unchanged, so one call could send several commands (CWE-93).
+    @Test func commandWithLineBreakIsRejectedWithoutWriting() async throws {
+        let upstream = try await FakeUpstream.start()
+        defer { Task { await upstream.stop() } }
+        let connection = try await SMTPClientConnection.connect(host: "127.0.0.1", port: upstream.port, connectTimeout: .seconds(2))
+        _ = try await connection.readReply(stage: .greeting, timeout: .seconds(2))
+        for line in ["NOOP\r\nRSET", "NOOP\nRSET", "NOOP\r"] {
+            await #expect(throws: SMTPClientError.invalidCommand(.ehlo)) {
+                try await connection.command(line, stage: .ehlo, timeout: .seconds(2))
+            }
+        }
+        // Nothing was written, so the dialogue is still in sync.
+        #expect(try await connection.command("NOOP", stage: .ehlo, timeout: .seconds(2)).code == 502)
+        await connection.close()
+        #expect(upstream.recorder.commands == ["NOOP"])
+    }
+
     /// Regression: a server that greets and closes at once (e.g. 421 at its connection limit) made `connect` fail
     /// with `connectFailed("notFound")`, because the client looked up its handler after NIO had torn down the pipeline.
     @Test func greetingBeforeImmediateCloseIsStillRead() async throws {
@@ -86,5 +103,7 @@ import SwiftySMTPClient
         let error = SMTPClientError.rejected(stage: .rcptTo, reply: SMTPReply(550, "5.1.1 unknown"))
         #expect(error.description == "Rejected (rcptTo): 550 5.1.1 unknown")
         #expect("\(SMTPClientError.timeout(.greeting))" == "Timed out (greeting)")
+        #expect("\(SMTPClientError.invalidAddress("x@a.de>\r\nDATA"))" == #"Invalid address: "x@a.de>\r\nDATA""#)
+        #expect("\(SMTPClientError.invalidCommand(.ehlo))" == "Command line contains CR or LF (ehlo)")
     }
 }

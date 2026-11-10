@@ -157,6 +157,8 @@ credentials.
 | `authNotOffered`                  | Credentials set, but neither `AUTH PLAIN` nor `AUTH LOGIN` is offered |
 | `eightBitNotSupported`            | The message has 8-bit bytes, but the server lacks `8BITMIME`         |
 | `messageTooLarge(limit:)`         | The message exceeds the server's `SIZE` limit                        |
+| `invalidAddress(String)`          | A sender or recipient has a character other than printable ASCII, or a space, `<` or `>`. Checked before connecting, so untrusted addresses cannot inject SMTP commands |
+| `invalidCommand(SMTPClientStage)` | A line passed to `SMTPClientConnection.command` (or `clientName`) contains CR or LF. Nothing is sent |
 
 `SMTPClientStage` is one of `connect`, `greeting`, `ehlo`, `startTLS`, `auth`, `mailFrom`, `rcptTo`, `data` and
 `endOfData`. A failure in `endOfData` is the critical one: the server may or may not have accepted the message.
@@ -171,7 +173,7 @@ do throws(SMTPClientError) {
     case .rejected(.auth, _):
         break   // credentials: fix the configuration, then retry
     case .rejected(_, let reply) where reply.isPermanentNegative,   // 5xx
-         .eightBitNotSupported, .messageTooLarge:
+         .eightBitNotSupported, .messageTooLarge, .invalidAddress, .invalidCommand:
         break   // permanent: the same message will fail again
     default:
         break   // network, TLS, timeout, 4xx: retry later

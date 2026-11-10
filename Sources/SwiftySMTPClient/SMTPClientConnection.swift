@@ -253,7 +253,11 @@ public final class SMTPClientConnection: Sendable {
     }
 
     /// Sends one command line (`CRLF` is appended) and returns the reply.
+    /// A line containing CR or LF throws `.invalidCommand` without sending anything, so one call is always one command.
     public func command(_ line: String, stage: SMTPClientStage, timeout: TimeAmount) async throws(SMTPClientError) -> SMTPReply {
+        guard !line.utf8.contains(where: { $0 == UInt8(ascii: "\r") || $0 == UInt8(ascii: "\n") }) else {
+            throw .invalidCommand(stage)
+        }
         try await write(Data((line + "\r\n").utf8), stage: stage)
         return try await readReply(stage: stage, timeout: timeout)
     }
