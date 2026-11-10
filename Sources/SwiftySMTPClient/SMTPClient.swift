@@ -26,12 +26,18 @@ public struct SMTPClient: Sendable {
     /// Sends one message.
     ///
     /// - Parameters:
-    ///   - sender: Envelope sender (`MAIL FROM`), a bare address without angle brackets.
+    ///   - sender: Envelope sender (`MAIL FROM`), a bare address without angle brackets. Empty sends the null
+    ///     reverse-path `<>`.
     ///   - recipients: Envelope recipients (`RCPT TO`). The first rejected recipient aborts the transaction.
     ///   - message: The complete RFC 5322 message (headers and body) with CRLF line endings.
     ///     Dot-stuffing and the terminating `CRLF.CRLF` are added by the client.
     /// - Throws: `SMTPClientError`. Cancelling the task closes the connection and ends the call.
+    ///   `.invalidAddress` is thrown before connecting if an address contains anything other than printable ASCII,
+    ///   or a space, `<` or `>`, so untrusted addresses cannot inject SMTP commands.
     public func send(from sender: String, recipients: [String], message: Data) async throws(SMTPClientError) {
+        for address in [sender] + recipients where !Self.isValidAddress(address) {
+            throw .invalidAddress(address)
+        }
         let config = configuration
         let connection = try await SMTPClientConnection.connect(
             host: config.host, port: config.port,
@@ -102,6 +108,11 @@ public struct SMTPClient: Sendable {
         } else {
             throw .authNotOffered
         }
+    }
+
+    /// Printable ASCII without space, `<` and `>`: anything else could end the command line or the `<…>` path.
+    static func isValidAddress(_ address: String) -> Bool {
+        address.utf8.allSatisfy { (0x21...0x7E).contains($0) && $0 != UInt8(ascii: "<") && $0 != UInt8(ascii: ">") }
     }
 
     private func expect(_ reply: SMTPReply, _ code: Int, stage: SMTPClientStage) throws(SMTPClientError) {

@@ -25,6 +25,11 @@ public enum SMTPClientError: Error, Equatable {
     case eightBitNotSupported
     /// The message is larger than the server's announced `SIZE` limit.
     case messageTooLarge(limit: Int)
+    /// A sender or recipient contains a character other than printable ASCII, or a space, `<` or `>`.
+    /// Checked before connecting, so nothing has been sent.
+    case invalidAddress(String)
+    /// A command line contains CR or LF. Nothing was sent; the connection stays usable.
+    case invalidCommand(SMTPClientStage)
 }
 
 extension SMTPClientError: CustomStringConvertible {
@@ -41,6 +46,10 @@ extension SMTPClientError: CustomStringConvertible {
         case .authNotOffered: "Server offers neither AUTH PLAIN nor AUTH LOGIN"
         case .eightBitNotSupported: "Message contains 8-bit data, but the server does not support 8BITMIME"
         case .messageTooLarge(let limit): "Message exceeds the server's size limit of \(limit) bytes"
+        // Escaped, so CR/LF in the rejected address cannot break the log line.
+        case .invalidAddress(let address): "Invalid address: \(String(reflecting: String(address.prefix(200))))"
+        // The line itself is never included: it may be an AUTH command carrying credentials.
+        case .invalidCommand(let stage): "Command line contains CR or LF (\(stage.rawValue))"
         }
     }
 }
