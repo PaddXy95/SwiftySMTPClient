@@ -1,9 +1,10 @@
 name: ci
 
-# Pull requests: tests only. Pushes to main: tests, then a new release (tag + GitHub release) if they pass.
+# Pushes to other branches: tests only. Pushes to main: tests, then a new release (tag + GitHub release) if they pass.
+# Pull requests from forks: tests only. Pull requests from this repository are already tested by their branch push.
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
 
 permissions:
@@ -12,6 +13,7 @@ permissions:
 jobs:
   linux:
     name: Linux (Swift ${{ matrix.swift }})
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     container: swift:${{ matrix.swift }}-noble
     strategy:
@@ -33,6 +35,7 @@ jobs:
 
   macos:
     name: macOS (Xcode 26)
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
